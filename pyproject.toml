@@ -1,0 +1,67 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fablecord"
+dynamic = ["version"]
+description = "A fast, dependency-free Discord API wrapper for Python."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.13"
+authors = [{ name = "cqlsh" }]
+keywords = ["discord", "api", "wrapper", "asyncio", "bot", "gateway"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Communications :: Chat",
+    "Topic :: Internet",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/cqlsh/Fablecord"
+Repository = "https://github.com/cqlsh/Fablecord"
+Issues = "https://github.com/cqlsh/Fablecord/issues"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=1.0",
+    "pyright>=1.1.400",
+]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+fablecord = ["py.typed"]
+
+[tool.setuptools.dynamic]
+version = { attr = "fablecord.__version__" }
+
+[tool.pyright]
+pythonVersion = "3.13"
+pythonPlatform = "All"
+typeCheckingMode = "strict"
+include = ["src", "tests", "benchmarks"]
+venvPath = "."
+venv = ".venv"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-ra --strict-markers"
+markers = ["integration: tests that talk to the real Discord API"]
