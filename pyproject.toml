@@ -24,7 +24,7 @@ classifiers = [
     "Topic :: Internet",
     "Topic :: Software Development :: Libraries",
     "Topic :: Software Development :: Libraries :: Python Modules",
-    "Typing :: Typed",
+    "Typing :: Typed"
 ]
 dependencies = []
 
@@ -37,7 +37,7 @@ Issues = "https://github.com/cqlsh/Fablecord/issues"
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=1.0",
-    "pyright>=1.1.400",
+    "pyright>=1.1.400"
 ]
 
 [tool.setuptools]
@@ -49,8 +49,15 @@ where = ["src"]
 [tool.setuptools.package-data]
 fablecord = ["py.typed"]
 
+[tool.setuptools.exclude-package-data]
+"fablecord._speedups" = ["*.c"]
+
 [tool.setuptools.dynamic]
 version = { attr = "fablecord.__version__" }
+
+[tool.cibuildwheel]
+archs = ["auto64"]
+test-command = 'python -c "from collections import deque; import fablecord.net.websocket as ws; from fablecord._speedups.websocket import frame, parse; q = deque(); assert ws._frame is frame and ws._parse_frames is parse; assert frame(2, 0x01020304, bytes(9)) == bytes([130, 137, 1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4, 1]); assert parse(bytes([129, 2, 104, 105]), 0, -1, q) == 4 and q.pop() == chr(104) + chr(105)"'
 
 [tool.pyright]
 pythonVersion = "3.13"

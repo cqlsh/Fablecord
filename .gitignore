@@ -1,2 +1,9 @@
 /.venv
 /.vscode
+/build
+/dist
+/wheelhouse
+*.egg-info
+__pycache__
+*.pyd
+*.so
