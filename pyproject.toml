@@ -37,7 +37,8 @@ Issues = "https://github.com/cqlsh/Fablecord/issues"
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=1.0",
-    "pyright>=1.1.400"
+    "pyright>=1.1.400",
+    "setuptools>=77"
 ]
 
 [tool.setuptools]
@@ -57,7 +58,7 @@ version = { attr = "fablecord.__version__" }
 
 [tool.cibuildwheel]
 archs = ["auto64"]
-test-command = 'python -c "from collections import deque; import fablecord.net.websocket as ws; from fablecord._speedups.websocket import frame, parse; q = deque(); assert ws._frame is frame and ws._parse_frames is parse; assert frame(2, 0x01020304, bytes(9)) == bytes([130, 137, 1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4, 1]); assert parse(bytes([129, 2, 104, 105]), 0, -1, q) == 4 and q.pop() == chr(104) + chr(105)"'
+test-command = 'python -c "from collections import deque; import fablecord.net.websocket as ws; import fablecord.gateway.decoder as gd; from fablecord._speedups.websocket import frame, parse; from fablecord._speedups.gateway import peek; q = deque(); assert ws._frame is frame and ws._parse_frames is parse and gd._peek is peek; assert frame(2, 0x01020304, bytes(9)) == bytes([130, 137, 1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4, 1]); assert parse(bytes([129, 2, 104, 105]), 0, -1, q) == 4 and q.pop() == chr(104) + chr(105); assert peek(bytes([123, 34, 116, 34, 58, 34, 82, 69, 65, 68, 89, 34, 44, 34, 115, 34, 58, 49, 44, 34, 111, 112, 34, 58, 48, 125])) == (0, 1, bytes([82, 69, 65, 68, 89]).decode()); assert peek(bytes([123, 34, 116, 34, 58, 110, 117, 108, 108, 44, 34, 115, 34, 58, 110, 117, 108, 108, 44, 34, 111, 112, 34, 58, 49, 49, 125])) == (11, None, None)"'
 
 [tool.pyright]
 pythonVersion = "3.13"
