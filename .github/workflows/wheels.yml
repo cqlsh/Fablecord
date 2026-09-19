@@ -10,6 +10,7 @@ on:
       - "src/fablecord/__init__.py"
       - "src/fablecord/_speedups/**"
       - "src/fablecord/net/websocket.py"
+      - "src/fablecord/gateway/decoder.py"
       - "README.md"
       - "LICENSE"
   push:
@@ -24,6 +25,7 @@ on:
       - "src/fablecord/__init__.py"
       - "src/fablecord/_speedups/**"
       - "src/fablecord/net/websocket.py"
+      - "src/fablecord/gateway/decoder.py"
       - "README.md"
       - "LICENSE"
 
@@ -71,11 +73,11 @@ jobs:
       - name: Tag matches package version
         if: startsWith(github.ref, 'refs/tags/v')
         run: test -f "dist/fablecord-${GITHUB_REF_NAME#v}.tar.gz"
-      - name: Sdist compiles and loads the extension
+      - name: Sdist compiles and loads the extensions
         run: |
           python -m pip install -v dist/*.tar.gz
           cd "$RUNNER_TEMP"
-          python -c "import fablecord.net.websocket as ws; assert ws._frame is not None and ws._parse_frames is not None"
+          python -c "import fablecord.net.websocket as ws; import fablecord.gateway.decoder as gd; assert ws._frame is not None and ws._parse_frames is not None and gd._peek is not None"
       - uses: actions/upload-artifact@v7
         with:
           name: dist-sdist
