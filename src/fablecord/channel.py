@@ -29,13 +29,20 @@ from datetime import datetime
 
 from .enums.channel import ChannelType, ForumLayoutType, ForumOrderType, VideoQualityMode
 from .overwrite import PermissionOverwrite
+from .flags.permissions import Permissions
 from .partial_emoji import PartialEmoji
 from .utils.snowflake import Snowflake
 from .flags.guild import ChannelFlags
 from .utils.time import Time
 
 if TYPE_CHECKING:
+    from .member import Member
+    from .guild import Guild
     from .state import State
+
+_VOICE: Final = Permissions.voice().value
+
+_TIMEOUT: Final = Permissions.view_channel.bit | Permissions.read_message_history.bit
 
 _ROLE: Final = 0
 
@@ -102,6 +109,14 @@ class Channel:
         """
         return f"https://discord.com/channels/{self.guild_id}/{self.id}"
 
+    @property
+    def guild(self) -> Guild | None:
+        """
+        Optional[:class:`Guild`]: The guild the channel belongs to,
+        ``None`` when it is not cached.
+        """
+        return self._state.get_guild(self.guild_id)
+
     def __str__(self) -> str:
         return self.name
 
@@ -138,6 +153,8 @@ class GuildChannel(Channel):
     """
 
     __slots__ = ["position", "category_id", "nsfw", "overwrites", "_members"]
+
+    _denied = 0
 
     def update(self, data: dict[str, Any], /) -> None:
         get = data.get
@@ -178,6 +195,61 @@ class GuildChannel(Channel):
         """
         return self.overwrites.get(target_id)
 
+    def permissions_for(self, member: Member, /) -> Permissions:
+        """
+        What a member may do in this channel.
+
+        What their roles allow across the guild is the starting point,
+        the channel's own overwrites are applied on top, and the rules
+        Discord applies without saying so finish it: a member who
+        cannot see the channel can do nothing in it, one who cannot
+        write cannot pin or attach either, and one who cannot join
+        cannot speak. Whatever the kind of channel has no use for is
+        dropped last, so a text channel never answers with a voice
+        permission, not even for the owner.
+
+        Parameters
+        -----------
+        member: :class:`Member`
+            The member to answer for.
+        """
+        if self._state.get_guild(self.guild_id) is None:
+            return Permissions.none()
+
+        base = member.guild_permissions
+
+        if not base.administrator:
+            overwrites = self.overwrites
+            everyone = overwrites.get(self.guild_id)
+
+            if everyone is not None:
+                base.handle_overwrite(everyone.allow, everyone.deny)
+
+            allow = 0
+            deny = 0
+
+            for role_id in member.role_ids:
+                overwrite = overwrites.get(role_id)
+
+                if overwrite is not None:
+                    allow |= overwrite.allow
+                    deny |= overwrite.deny
+
+            base.handle_overwrite(allow, deny)
+
+            own = overwrites.get(member.id)
+            if own is not None:
+                base.handle_overwrite(own.allow, own.deny)
+
+            if member.is_timed_out():
+                base.value &= _TIMEOUT
+
+            base.apply_implicit_rules()
+
+        base.value &= ~self._denied
+
+        return base
+
     def is_role_overwrite(self, target_id: int, /) -> bool:
         """
         Whether an overwrite belongs to a role rather than to a single
@@ -192,6 +264,25 @@ class GuildChannel(Channel):
         makes a client ask before it shows anything.
         """
         return self.nsfw
+
+    @property
+    def category(self) -> CategoryChannel | None:
+        """
+        Optional[:class:`CategoryChannel`]: The category holding the
+        channel, ``None`` when it sits at the top level or the guild is
+        not cached.
+        """
+        category_id = self.category_id
+        if category_id is None:
+            return None
+
+        guild = self._state.get_guild(self.guild_id)
+        if guild is None:
+            return None
+
+        channel = guild.get_channel(category_id)
+
+        return channel if isinstance(channel, CategoryChannel) else None
 
     @property
     def created_at(self) -> datetime:
@@ -236,6 +327,8 @@ class TextChannel(GuildChannel):
         "default_auto_archive_duration",
         "default_thread_slowmode_delay"
     ]
+
+    _denied = _VOICE
 
     def update(self, data: dict[str, Any], /) -> None:
         super().update(data)
@@ -469,6 +562,8 @@ class ForumChannel(GuildChannel):
         "default_reaction_emoji"
     ]
 
+    _denied = _VOICE
+
     def update(self, data: dict[str, Any], /) -> None:
         super().update(data)
 
@@ -610,6 +705,38 @@ class Thread(Channel):
         tags means.
         """
         return bool(self.applied_tag_ids)
+
+    def permissions_for(self, member: Member, /) -> Permissions:
+        """
+        What a member may do in the thread, which is whatever they may
+        do in the channel it hangs under.
+
+        Parameters
+        -----------
+        member: :class:`Member`
+            The member to answer for.
+        """
+        guild = self._state.get_guild(self.guild_id)
+        if guild is None:
+            return Permissions.none()
+
+        parent = guild.get_channel(self.parent_id)
+        if parent is None:
+            return Permissions.none()
+
+        return parent.permissions_for(member)
+
+    @property
+    def parent(self) -> GuildChannel | None:
+        """
+        Optional[:class:`GuildChannel`]: The channel the thread hangs
+        under, ``None`` when it or the guild is not cached.
+        """
+        guild = self._state.get_guild(self.guild_id)
+        if guild is None:
+            return None
+
+        return guild.get_channel(self.parent_id)
 
     @property
     def created_at(self) -> datetime | None:

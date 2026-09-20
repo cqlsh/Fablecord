@@ -24,17 +24,24 @@ DEALINGS IN THE SOFTWARE.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 from datetime import datetime
 
 from .flags.user import MemberFlags, PublicUserFlags
+from .flags.permissions import Permissions
 from .utils.time import Time
 from .colour import Colour
 from .asset import Asset
 from .user import User
 
 if TYPE_CHECKING:
+    from .guild import Guild
     from .state import State
+    from .role import Role
+
+_ADMINISTRATOR: Final = Permissions.administrator.bit
+
+_TIMEOUT: Final = Permissions.view_channel.bit | Permissions.read_message_history.bit
 
 class Member:
     """
@@ -277,6 +284,128 @@ class Member:
         flags.value = self._flags
 
         return flags
+
+    @property
+    def guild(self) -> Guild | None:
+        """
+        Optional[:class:`Guild`]: The guild the member is in, ``None``
+        when it is not cached.
+        """
+        return self._state.get_guild(self.guild_id)
+
+    @property
+    def roles(self) -> list[Role]:
+        """
+        List[:class:`Role`]: The member's roles from the lowest to the
+        highest, ``@everyone`` first. Empty while the guild is not
+        cached.
+        """
+        guild = self._state.get_guild(self.guild_id)
+        if guild is None:
+            return []
+
+        roles = [role for role in map(guild.get_role, self.role_ids) if role is not None]
+        default = guild.default_role
+
+        if default is not None:
+            roles.append(default)
+
+        roles.sort(key=lambda role: (role.id != role.guild_id, role.position, -role.id))
+
+        return roles
+
+    @property
+    def top_role(self) -> Role | None:
+        """
+        Optional[:class:`Role`]: The member's highest role, which is
+        what Discord weighs before it lets one member act on another.
+        ``@everyone`` when they hold no other, ``None`` while the guild
+        is not cached.
+        """
+        guild = self._state.get_guild(self.guild_id)
+        if guild is None:
+            return None
+
+        roles = [role for role in map(guild.get_role, self.role_ids) if role is not None]
+        if not roles:
+            return guild.default_role
+
+        return max(roles, key=lambda role: (role.position, -role.id))
+
+    @property
+    def colour(self) -> Colour:
+        """
+        :class:`Colour`: The colour the member's name is shown in,
+        which comes from their highest role that carries one. Black
+        when none of them does, which is what an uncoloured name is.
+        """
+        guild = self._state.get_guild(self.guild_id)
+        if guild is None:
+            return Colour(0)
+
+        get_role = guild.get_role
+        highest = (-1, 0)
+        value = 0
+
+        for role_id in self.role_ids:
+            role = get_role(role_id)
+
+            if role is None:
+                continue
+
+            colour = role.colour.value
+            rank = (role.position, -role.id)
+
+            if colour and rank > highest:
+                highest = rank
+                value = colour
+
+        return Colour(value)
+
+    @property
+    def color(self) -> Colour:
+        """
+        :class:`Colour`: :attr:`colour` under the other spelling.
+        """
+        return self.colour
+
+    @property
+    def guild_permissions(self) -> Permissions:
+        """
+        :class:`Permissions`: What the member may do anywhere in the
+        guild, before a channel changes anything about it.
+
+        The owner and anyone carrying ``administrator`` get everything.
+        A member who is timed out keeps nothing but seeing a channel
+        and reading what is already in it.
+        """
+        guild = self._state.get_guild(self.guild_id)
+        if guild is None:
+            return Permissions.none()
+
+        if guild.owner_id == self.id:
+            return Permissions.all()
+
+        get_role = guild.get_role
+        default = guild.default_role
+        value = 0 if default is None else default.permissions.value
+
+        for role_id in self.role_ids:
+            role = get_role(role_id)
+
+            if role is not None:
+                value |= role.permissions.value
+
+        if value & _ADMINISTRATOR:
+            return Permissions.all()
+
+        if self.is_timed_out():
+            value &= _TIMEOUT
+
+        permissions = Permissions.__new__(Permissions)
+        permissions.value = value
+
+        return permissions
 
     @property
     def created_at(self) -> datetime:

@@ -34,6 +34,8 @@ from .colour import Colour
 from .asset import Asset
 
 if TYPE_CHECKING:
+    from .member import Member
+    from .guild import Guild
     from .state import State
 
 class RoleTags:
@@ -304,6 +306,33 @@ class Role:
         return flags
 
     @property
+    def guild(self) -> Guild | None:
+        """
+        Optional[:class:`Guild`]: The guild the role belongs to,
+        ``None`` when it is not cached.
+        """
+        return self._state.get_guild(self.guild_id)
+
+    @property
+    def members(self) -> list[Member]:
+        """
+        List[:class:`Member`]: Every cached member who has the role.
+        ``@everyone`` has every one of them. Empty while the guild is
+        not cached.
+        """
+        guild = self._state.get_guild(self.guild_id)
+        if guild is None:
+            return []
+
+        members = guild.members
+        if self.id == self.guild_id:
+            return members
+
+        role_id = self.id
+
+        return [member for member in members if role_id in member.role_ids]
+
+    @property
     def mention(self) -> str:
         """
         :class:`str`: The text that pings the role in a message.
@@ -324,6 +353,33 @@ class Role:
         carries the guild's own ID.
         """
         return self.id == self.guild_id
+
+    def is_assignable(self) -> bool:
+        """
+        Whether the bot can give this role out and take it away, which
+        it can when the role is neither ``@everyone`` nor one Discord
+        manages, and sits below a role the bot holds itself.
+        """
+        guild = self._state.get_guild(self.guild_id)
+        if guild is None or self.id == self.guild_id or self.managed:
+            return False
+
+        me = guild.me
+        if me is None:
+            return False
+
+        if guild.owner_id == me.id:
+            return True
+
+        get_role = guild.get_role
+
+        for role_id in me.role_ids:
+            role = get_role(role_id)
+
+            if role is not None and self < role:
+                return True
+
+        return False
 
     def is_bot_managed(self) -> bool:
         """
