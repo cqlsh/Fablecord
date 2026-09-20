@@ -28,8 +28,9 @@ from weakref import ref
 from typing import Any
 
 from .events.dispatcher import Dispatcher
-from .user import ClientUser, User
 from .http.client import RESTClient
+from .user import ClientUser, User
+from .guild import Guild
 
 class UserRef(ref[User]):
     """
@@ -46,6 +47,10 @@ class State:
     Everything the models share: the REST client, the dispatcher and
     the cache.
 
+    Guilds are held for as long as the bot is in them, and everything
+    inside one hangs off it, so a role, a channel or a member is found
+    through its guild rather than through a cache of its own.
+
     Users are held weakly: one stays cached while a member, a message
     or a reaction refers to it and leaves on its own afterwards, so
     the cache never outgrows what the bot is looking at.
@@ -60,13 +65,56 @@ class State:
         The bot's own user once ``READY`` arrived.
     """
 
-    __slots__ = ["rest", "dispatcher", "user", "_users"]
+    __slots__ = ["rest", "dispatcher", "user", "_guilds", "_users"]
 
     def __init__(self, *, rest: RESTClient, dispatcher: Dispatcher) -> None:
         self.rest = rest
         self.dispatcher = dispatcher
         self.user: ClientUser | None = None
+        self._guilds: dict[int, Guild] = {}
         self._users: dict[int, UserRef] = {}
+
+    @property
+    def guilds(self) -> list[Guild]:
+        """
+        List[:class:`Guild`]: Every guild the bot is in.
+        """
+        return list(self._guilds.values())
+
+    def get_guild(self, guild_id: int, /) -> Guild | None:
+        """
+        The cached guild with an ID, ``None`` when the bot is in none
+        with that ID.
+        """
+        return self._guilds.get(guild_id)
+
+    def store_guild(self, data: dict[str, Any], /) -> Guild:
+        """
+        The guild for a payload: the cached one brought up to date, or
+        a new one that goes into the cache.
+
+        ``GUILD_CREATE`` arrives again after every reconnect, and
+        updating the object rather than replacing it means the guilds,
+        roles and channels a bot is holding on to stay the ones the
+        cache hands out.
+        """
+        guild_id = int(data["id"])
+        guild = self._guilds.get(guild_id)
+
+        if guild is None:
+            guild = Guild(self, data)
+            self._guilds[guild_id] = guild
+        else:
+            guild.update(data)
+
+        return guild
+
+    def remove_guild(self, guild_id: int, /) -> Guild | None:
+        """
+        Drops a guild from the cache and hands it back, ``None`` when
+        none was cached.
+        """
+        return self._guilds.pop(guild_id, None)
 
     @property
     def users(self) -> list[User]:
