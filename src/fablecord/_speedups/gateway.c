@@ -148,7 +148,7 @@ static PyObject *peek(PyObject *Py_UNUSED(module), PyObject *const *args, Py_ssi
     const unsigned char *digits = p;
     while (p < end && *p >= '0' && *p <= '9') {
         if (op > 99) {
-            other();
+            return other();
         }
         op = op * 10 + (*p - '0');
         p++;
