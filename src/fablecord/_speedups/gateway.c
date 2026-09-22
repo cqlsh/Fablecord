@@ -52,10 +52,30 @@ static PyObject *peek(PyObject *Py_UNUSED(module), PyObject *const *args, Py_ssi
         return NULL;
     }
 
+    
+
     Py_buffer view;
     const unsigned char *p;
     const unsigned char *end;
-    int owned = 0;
+    bool owned = false;
+
+        auto other = [&]() -> PyObject *
+    {  
+        if (owned)
+        {
+            PyBuffer_Release(&view);
+        }
+        Py_RETURN_NONE;
+    };
+
+    auto fail = [&]() -> PyObject *
+    {
+        if (owned)
+        {
+            PyBuffer_Release(&view);
+        }
+        return nullptr;
+    };
 
     if (PyBytes_Check(args[0])) {
         p = (const unsigned char *)PyBytes_AS_STRING(args[0]);
@@ -66,7 +86,7 @@ static PyObject *peek(PyObject *Py_UNUSED(module), PyObject *const *args, Py_ssi
         }
         p = (const unsigned char *)view.buf;
         end = p + view.len;
-        owned = 1;
+        owned = true;
     }
 
     const unsigned char *name = NULL;
@@ -76,7 +96,7 @@ static PyObject *peek(PyObject *Py_UNUSED(module), PyObject *const *args, Py_ssi
     long op = 0;
 
     if (end - p < 5 || memcmp(p, "{\"t\":", 5) != 0) {
-        goto other;
+        return other();
     }
     p += 5;
 
@@ -90,15 +110,15 @@ static PyObject *peek(PyObject *Py_UNUSED(module), PyObject *const *args, Py_ssi
         }
         name_size = p - name;
         if (name_size == 0 || p >= end || *p != '"') {
-            goto other;
+            return other();
         }
         p++;
     } else {
-        goto other;
+        return other();
     }
 
     if (end - p < 5 || memcmp(p, ",\"s\":", 5) != 0) {
-        goto other;
+        return other();
     }
     p += 5;
 
@@ -109,32 +129,32 @@ static PyObject *peek(PyObject *Py_UNUSED(module), PyObject *const *args, Py_ssi
         while (p < end && *p >= '0' && *p <= '9') {
             int digit = *p - '0';
             if (sequence > (LLONG_MAX - digit) / 10) {
-                goto other;
+                return other();
             }
             sequence = sequence * 10 + digit;
             p++;
         }
         if (p == digits) {
-            goto other;
+            return other();
         }
         has_sequence = 1;
     }
 
     if (end - p < 6 || memcmp(p, ",\"op\":", 6) != 0) {
-        goto other;
+        return other();
     }
     p += 6;
 
     const unsigned char *digits = p;
     while (p < end && *p >= '0' && *p <= '9') {
         if (op > 99) {
-            goto other;
+            other();
         }
         op = op * 10 + (*p - '0');
         p++;
     }
     if (p == digits) {
-        goto other;
+        return other();
     }
 
     PyObject *name_object;
@@ -143,7 +163,7 @@ static PyObject *peek(PyObject *Py_UNUSED(module), PyObject *const *args, Py_ssi
     } else {
         name_object = PyUnicode_FromStringAndSize((const char *)name, name_size);
         if (name_object == NULL) {
-            goto fail;
+            return fail();
         }
         PyUnicode_InternInPlace(&name_object);
     }
@@ -151,14 +171,14 @@ static PyObject *peek(PyObject *Py_UNUSED(module), PyObject *const *args, Py_ssi
     PyObject *sequence_object = has_sequence ? PyLong_FromLongLong(sequence) : Py_NewRef(Py_None);
     if (sequence_object == NULL) {
         Py_DECREF(name_object);
-        goto fail;
+        return fail();
     }
 
     PyObject *op_object = PyLong_FromLong(op);
     if (op_object == NULL) {
         Py_DECREF(name_object);
         Py_DECREF(sequence_object);
-        goto fail;
+        return fail();
     }
 
     PyObject *result = PyTuple_New(3);
@@ -166,7 +186,7 @@ static PyObject *peek(PyObject *Py_UNUSED(module), PyObject *const *args, Py_ssi
         Py_DECREF(name_object);
         Py_DECREF(sequence_object);
         Py_DECREF(op_object);
-        goto fail;
+        return fail();
     }
     PyTuple_SET_ITEM(result, 0, op_object);
     PyTuple_SET_ITEM(result, 1, sequence_object);
@@ -175,19 +195,7 @@ static PyObject *peek(PyObject *Py_UNUSED(module), PyObject *const *args, Py_ssi
     if (owned) {
         PyBuffer_Release(&view);
     }
-    return result;
-
-other:
-    if (owned) {
-        PyBuffer_Release(&view);
-    }
-    Py_RETURN_NONE;
-
-fail:
-    if (owned) {
-        PyBuffer_Release(&view);
-    }
-    return NULL;
+    return fail();
 }
 
 static PyMethodDef methods[] = {
