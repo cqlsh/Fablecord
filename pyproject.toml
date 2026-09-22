@@ -51,14 +51,14 @@ where = ["src"]
 fablecord = ["py.typed"]
 
 [tool.setuptools.exclude-package-data]
-"fablecord._speedups" = ["*.c"]
+"fablecord._speedups" = ["*.cpp"]
 
 [tool.setuptools.dynamic]
 version = { attr = "fablecord.__version__" }
 
 [tool.cibuildwheel]
 archs = ["auto64"]
-test-command = 'python -c "from collections import deque; import fablecord.net.websocket as ws; import fablecord.gateway.decoder as gd; import fablecord.partial_emoji as pe; from fablecord._speedups.websocket import frame, parse; from fablecord._speedups.gateway import peek; from fablecord._speedups.emoji import EmojiBase; q = deque(); assert ws._frame is frame and ws._parse_frames is parse and gd._peek is peek; assert frame(2, 0x01020304, bytes(9)) == bytes([130, 137, 1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4, 1]); assert parse(bytes([129, 2, 104, 105]), 0, -1, q) == 4 and q.pop() == chr(104) + chr(105); assert peek(bytes([123, 34, 116, 34, 58, 34, 82, 69, 65, 68, 89, 34, 44, 34, 115, 34, 58, 49, 44, 34, 111, 112, 34, 58, 48, 125])) == (0, 1, bytes([82, 69, 65, 68, 89]).decode()); assert peek(bytes([123, 34, 116, 34, 58, 110, 117, 108, 108, 44, 34, 115, 34, 58, 110, 117, 108, 108, 44, 34, 111, 112, 34, 58, 49, 49, 125])) == (11, None, None); assert pe.PartialEmoji.__bases__ == (EmojiBase,); e = pe.PartialEmoji.from_dict(None, {chr(105) + chr(100): chr(49) * 19, chr(110) + chr(97) + chr(109) + chr(101): chr(120)}); assert e.id == int(chr(49) * 19) and e.name == chr(120) and e.animated is False and e == pe.PartialEmoji(name=chr(121), id=e.id)"'
+test-command = 'python -c "from collections import deque; import fablecord.net.websocket as ws; import fablecord.gateway.decoder as gd; import fablecord.partial_emoji as pe; from fablecord._speedups.websocket import frame, parse; from fablecord._speedups.gateway import peek; from fablecord._speedups.emoji import EmojiBase; q = deque(); assert ws._frame is frame and ws._parse_frames is parse and gd._peek is peek; assert frame(2, 0x01020304, bytes(9)) == bytes([130, 137, 1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4, 1]); assert parse(bytes([129, 2, 104, 105]), 0, -1, q) == 4 and q.pop() == chr(104) + chr(105); assert peek(bytes([123, 34, 116, 34, 58, 34, 82, 69, 65, 68, 89, 34, 44, 34, 115, 34, 58, 49, 44, 34, 111, 112, 34, 58, 48, 125])) == (0, 1, bytes([82, 69, 65, 68, 89]).decode()); assert peek(bytes([123, 34, 116, 34, 58, 110, 117, 108, 108, 44, 34, 115, 34, 58, 110, 117, 108, 108, 44, 34, 111, 112, 34, 58, 49, 49, 125])) == (11, None, None); assert pe.PartialEmoji.__bases__[0] is EmojiBase; e = pe.PartialEmoji.from_dict(None, {chr(105) + chr(100): chr(49) * 19, chr(110) + chr(97) + chr(109) + chr(101): chr(120)}); assert e.id == int(chr(49) * 19) and e.name == chr(120) and e.animated is False and e == pe.PartialEmoji(name=chr(121), id=e.id)"'
 
 [tool.pyright]
 pythonVersion = "3.13"
