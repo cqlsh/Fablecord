@@ -24,12 +24,53 @@ DEALINGS IN THE SOFTWARE.
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
-#include <stdint.h>
-#include <string.h>
+#include <cstdint>
+#include <cstring>
 
-typedef struct {
+namespace {
+
+struct websocket_state
+{
     PyObject *append_name;
-} websocket_state;
+};
+
+class Borrowed
+{
+public:
+    const unsigned char *bytes;
+    Py_ssize_t size;
+
+    Borrowed() : bytes(nullptr), size(0), view(), owned(false)
+    {
+    }
+
+    ~Borrowed()
+    {
+        if (owned) {
+            PyBuffer_Release(&view);
+        }
+    }
+
+    Borrowed(const Borrowed &) = delete;
+    Borrowed &operator=(const Borrowed &) = delete;
+
+    bool open(PyObject *object)
+    {
+        if (PyObject_GetBuffer(object, &view, PyBUF_SIMPLE) < 0) {
+            return false;
+        }
+
+        bytes = static_cast<const unsigned char *>(view.buf);
+        size = view.len;
+        owned = true;
+
+        return true;
+    }
+
+private:
+    Py_buffer view;
+    bool owned;
+};
 
 PyDoc_STRVAR(frame_doc,
 "frame(opcode, key, payload, /)\n"
@@ -42,91 +83,89 @@ PyDoc_STRVAR(frame_doc,
 "32-bit mask as an integer, its big-endian bytes go on the wire. payload is\n"
 "any bytes-like object.");
 
-static PyObject *frame(PyObject *Py_UNUSED(module), PyObject *const *args, Py_ssize_t nargs)
+PyObject *frame(PyObject *Py_UNUSED(module), PyObject *const *args, Py_ssize_t nargs)
 {
     if (nargs != 3) {
         PyErr_SetString(PyExc_TypeError, "frame() takes exactly three arguments: opcode, key and payload");
-        return NULL;
+        return nullptr;
     }
 
     long opcode = PyLong_AsLong(args[0]);
     if (opcode == -1 && PyErr_Occurred()) {
-        return NULL;
+        return nullptr;
     }
     if (opcode < 0 || opcode > 15) {
         PyErr_SetString(PyExc_ValueError, "opcode must be between 0 and 15");
-        return NULL;
+        return nullptr;
     }
 
     unsigned long long key = PyLong_AsUnsignedLongLong(args[1]);
-    if (key == (unsigned long long)-1 && PyErr_Occurred()) {
-        return NULL;
+    if (key == static_cast<unsigned long long>(-1) && PyErr_Occurred()) {
+        return nullptr;
     }
     if (key > 0xFFFFFFFFULL) {
         PyErr_SetString(PyExc_ValueError, "key must fit in 32 bits");
-        return NULL;
+        return nullptr;
     }
 
-    Py_buffer payload;
-    if (PyObject_GetBuffer(args[2], &payload, PyBUF_SIMPLE) < 0) {
-        return NULL;
+    Borrowed payload;
+    if (!payload.open(args[2])) {
+        return nullptr;
     }
 
-    Py_ssize_t size = payload.len;
+    Py_ssize_t size = payload.size;
     if (size > PY_SSIZE_T_MAX - 14) {
-        PyBuffer_Release(&payload);
         PyErr_SetString(PyExc_OverflowError, "payload is too large for one frame");
-        return NULL;
-    }
-    Py_ssize_t header_size = size < 126 ? 2 : size < 65536 ? 4 : 10;
-    PyObject *result = PyBytes_FromStringAndSize(NULL, header_size + 4 + size);
-    if (result == NULL) {
-        PyBuffer_Release(&payload);
-        return NULL;
+        return nullptr;
     }
 
-    unsigned char *out = (unsigned char *)PyBytes_AS_STRING(result);
-    out[0] = (unsigned char)(0x80 | opcode);
+    Py_ssize_t header_size = size < 126 ? 2 : size < 65536 ? 4 : 10;
+    PyObject *result = PyBytes_FromStringAndSize(nullptr, header_size + 4 + size);
+    if (result == nullptr) {
+        return nullptr;
+    }
+
+    unsigned char *out = reinterpret_cast<unsigned char *>(PyBytes_AS_STRING(result));
+    out[0] = static_cast<unsigned char>(0x80 | opcode);
 
     if (size < 126) {
-        out[1] = (unsigned char)(0x80 | size);
+        out[1] = static_cast<unsigned char>(0x80 | size);
     } else if (size < 65536) {
         out[1] = 0xFE;
-        out[2] = (unsigned char)(size >> 8);
-        out[3] = (unsigned char)size;
+        out[2] = static_cast<unsigned char>(size >> 8);
+        out[3] = static_cast<unsigned char>(size);
     } else {
         out[1] = 0xFF;
         for (int i = 0; i < 8; i++) {
-            out[2 + i] = (unsigned char)((uint64_t)size >> (56 - 8 * i));
+            out[2 + i] = static_cast<unsigned char>(static_cast<std::uint64_t>(size) >> (56 - 8 * i));
         }
     }
 
     unsigned char *mask = out + header_size;
-    mask[0] = (unsigned char)(key >> 24);
-    mask[1] = (unsigned char)(key >> 16);
-    mask[2] = (unsigned char)(key >> 8);
-    mask[3] = (unsigned char)key;
+    mask[0] = static_cast<unsigned char>(key >> 24);
+    mask[1] = static_cast<unsigned char>(key >> 16);
+    mask[2] = static_cast<unsigned char>(key >> 8);
+    mask[3] = static_cast<unsigned char>(key);
 
-    uint64_t pattern;
-    memcpy(&pattern, mask, 4);
-    memcpy((unsigned char *)&pattern + 4, mask, 4);
+    std::uint64_t pattern;
+    std::memcpy(&pattern, mask, 4);
+    std::memcpy(reinterpret_cast<unsigned char *>(&pattern) + 4, mask, 4);
 
-    const unsigned char *src = (const unsigned char *)payload.buf;
+    const unsigned char *src = payload.bytes;
     unsigned char *dst = mask + 4;
     Py_ssize_t i = 0;
 
     for (; i + 8 <= size; i += 8) {
-        uint64_t word;
-        memcpy(&word, src + i, 8);
+        std::uint64_t word;
+        std::memcpy(&word, src + i, 8);
         word ^= pattern;
-        memcpy(dst + i, &word, 8);
+        std::memcpy(dst + i, &word, 8);
     }
 
     for (; i < size; i++) {
         dst[i] = src[i] ^ mask[i & 3];
     }
 
-    PyBuffer_Release(&payload);
     return result;
 }
 
@@ -141,42 +180,41 @@ PyDoc_STRVAR(parse_doc,
 "fit, or text that is not UTF-8. The caller handles that frame itself. A\n"
 "negative max_size accepts any length.");
 
-static PyObject *parse(PyObject *module, PyObject *const *args, Py_ssize_t nargs)
+PyObject *parse(PyObject *module, PyObject *const *args, Py_ssize_t nargs)
 {
     if (nargs != 4) {
         PyErr_SetString(PyExc_TypeError, "parse() takes exactly four arguments: buffer, offset, max_size and messages");
-        return NULL;
+        return nullptr;
     }
 
-    websocket_state *state = (websocket_state *)PyModule_GetState(module);
-    if (state == NULL || state->append_name == NULL) {
+    websocket_state *state = static_cast<websocket_state *>(PyModule_GetState(module));
+    if (state == nullptr || state->append_name == nullptr) {
         PyErr_SetString(PyExc_SystemError, "fablecord._speedups.websocket is not initialised");
-        return NULL;
+        return nullptr;
     }
 
     Py_ssize_t offset = PyLong_AsSsize_t(args[1]);
     if (offset == -1 && PyErr_Occurred()) {
-        return NULL;
+        return nullptr;
     }
 
     Py_ssize_t max_size = PyLong_AsSsize_t(args[2]);
     if (max_size == -1 && PyErr_Occurred()) {
-        return NULL;
+        return nullptr;
     }
 
-    Py_buffer view;
-    if (PyObject_GetBuffer(args[0], &view, PyBUF_SIMPLE) < 0) {
-        return NULL;
+    Borrowed frames;
+    if (!frames.open(args[0])) {
+        return nullptr;
     }
 
-    const unsigned char *buffer = (const unsigned char *)view.buf;
-    Py_ssize_t total = view.len;
+    const unsigned char *buffer = frames.bytes;
+    Py_ssize_t total = frames.size;
     PyObject *messages = args[3];
 
     if (offset < 0 || offset > total) {
-        PyBuffer_Release(&view);
         PyErr_SetString(PyExc_ValueError, "offset is outside the buffer");
-        return NULL;
+        return nullptr;
     }
 
     while (total - offset >= 2) {
@@ -194,7 +232,7 @@ static PyObject *parse(PyObject *module, PyObject *const *args, Py_ssize_t nargs
             if (total - start < 2) {
                 break;
             }
-            length = (Py_ssize_t)buffer[start] << 8 | buffer[start + 1];
+            length = static_cast<Py_ssize_t>(buffer[start]) << 8 | buffer[start + 1];
             if (length < 126) {
                 break;
             }
@@ -203,14 +241,14 @@ static PyObject *parse(PyObject *module, PyObject *const *args, Py_ssize_t nargs
             if (total - start < 8) {
                 break;
             }
-            uint64_t wide = 0;
+            std::uint64_t wide = 0;
             for (int i = 0; i < 8; i++) {
                 wide = wide << 8 | buffer[start + i];
             }
-            if (wide < 65536 || wide > (uint64_t)PY_SSIZE_T_MAX) {
+            if (wide < 65536 || wide > static_cast<std::uint64_t>(PY_SSIZE_T_MAX)) {
                 break;
             }
-            length = (Py_ssize_t)wide;
+            length = static_cast<Py_ssize_t>(wide);
             start += 8;
         }
 
@@ -220,93 +258,91 @@ static PyObject *parse(PyObject *module, PyObject *const *args, Py_ssize_t nargs
 
         PyObject *item;
         if (first == 0x81) {
-            item = PyUnicode_DecodeUTF8((const char *)buffer + start, length, NULL);
-            if (item == NULL) {
+            item = PyUnicode_DecodeUTF8(reinterpret_cast<const char *>(buffer) + start, length, nullptr);
+            if (item == nullptr) {
                 if (PyErr_ExceptionMatches(PyExc_UnicodeDecodeError)) {
                     PyErr_Clear();
                     break;
                 }
-                PyBuffer_Release(&view);
-                return NULL;
+                return nullptr;
             }
         } else {
-            item = PyBytes_FromStringAndSize((const char *)buffer + start, length);
-            if (item == NULL) {
-                PyBuffer_Release(&view);
-                return NULL;
+            item = PyBytes_FromStringAndSize(reinterpret_cast<const char *>(buffer) + start, length);
+            if (item == nullptr) {
+                return nullptr;
             }
         }
 
         PyObject *appended = PyObject_CallMethodOneArg(messages, state->append_name, item);
         Py_DECREF(item);
-        if (appended == NULL) {
-            PyBuffer_Release(&view);
-            return NULL;
+        if (appended == nullptr) {
+            return nullptr;
         }
         Py_DECREF(appended);
 
         offset = start + length;
     }
 
-    PyBuffer_Release(&view);
     return PyLong_FromSsize_t(offset);
 }
 
-static PyMethodDef methods[] = {
-    {"frame", (PyCFunction)(void (*)(void))frame, METH_FASTCALL, frame_doc},
-    {"parse", (PyCFunction)(void (*)(void))parse, METH_FASTCALL, parse_doc},
-    {NULL, NULL, 0, NULL}
+PyMethodDef methods[] = {
+    {"frame", reinterpret_cast<PyCFunction>(reinterpret_cast<void (*)()>(frame)), METH_FASTCALL, frame_doc},
+    {"parse", reinterpret_cast<PyCFunction>(reinterpret_cast<void (*)()>(parse)), METH_FASTCALL, parse_doc},
+    {nullptr, nullptr, 0, nullptr}
 };
 
-PyDoc_STRVAR(module_doc, "C helpers for fablecord.net.websocket, used when they could be built.");
+PyDoc_STRVAR(module_doc, "C++ helpers for fablecord.net.websocket, used when they could be built.");
 
-static int websocket_exec(PyObject *module)
+int websocket_exec(PyObject *module)
 {
-    websocket_state *state = (websocket_state *)PyModule_GetState(module);
+    websocket_state *state = static_cast<websocket_state *>(PyModule_GetState(module));
 
     state->append_name = PyUnicode_InternFromString("append");
-    return state->append_name == NULL ? -1 : 0;
+    return state->append_name == nullptr ? -1 : 0;
 }
 
-static int websocket_traverse(PyObject *module, visitproc visit, void *arg)
+int websocket_traverse(PyObject *module, visitproc visit, void *arg)
 {
-    websocket_state *state = (websocket_state *)PyModule_GetState(module);
+    websocket_state *state = static_cast<websocket_state *>(PyModule_GetState(module));
 
     Py_VISIT(state->append_name);
     return 0;
 }
 
-static int websocket_clear(PyObject *module)
+int websocket_clear(PyObject *module)
 {
-    websocket_state *state = (websocket_state *)PyModule_GetState(module);
+    websocket_state *state = static_cast<websocket_state *>(PyModule_GetState(module));
 
     Py_CLEAR(state->append_name);
     return 0;
 }
 
-static void websocket_free(void *module)
+void websocket_free(void *module)
 {
-    websocket_clear((PyObject *)module);
+    websocket_clear(static_cast<PyObject *>(module));
 }
 
-static PyModuleDef_Slot slots[] = {
-    {Py_mod_exec, websocket_exec},
+PyModuleDef_Slot slots[] = {
+    {Py_mod_exec, reinterpret_cast<void *>(websocket_exec)},
     {Py_mod_multiple_interpreters, Py_MOD_PER_INTERPRETER_GIL_SUPPORTED},
     {Py_mod_gil, Py_MOD_GIL_NOT_USED},
-    {0, NULL}
+    {0, nullptr}
 };
 
-static struct PyModuleDef module = {
-    .m_base = PyModuleDef_HEAD_INIT,
-    .m_name = "fablecord._speedups.websocket",
-    .m_doc = module_doc,
-    .m_size = sizeof(websocket_state),
-    .m_methods = methods,
-    .m_slots = slots,
-    .m_traverse = websocket_traverse,
-    .m_clear = websocket_clear,
-    .m_free = websocket_free
+PyModuleDef module = {
+    PyModuleDef_HEAD_INIT,
+    "fablecord._speedups.websocket",
+    module_doc,
+    sizeof(websocket_state),
+    methods,
+    slots,
+    websocket_traverse,
+    websocket_clear,
+    websocket_free
 };
+
+}
 
 PyMODINIT_FUNC PyInit_websocket(void)
 {
